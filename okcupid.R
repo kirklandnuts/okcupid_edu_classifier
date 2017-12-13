@@ -41,17 +41,10 @@ SC_BIN <- c("space camp", "dropped out of space camp", "working on space camp",
 
 
 # Functions ----
-# clean_text <- function(txt) {
-#   new_text <- txt %>% tolower() %>%
-#     str_replace_all("\\n", " ") %>%
-#     str_replace_all("<br \\/>", " ") %>%
-#     str_replace_all("\\s+", " ")
-#   new_text
-# }
 
 # function for mapping education levels into one of the following bins:
 #   [highschool, pursuing undergraduate degree, received undergraduate degree,
-#     pursuing graduate degree, received graduate degree, other]
+#   pursuing graduate degree, received graduate degree, other]
 edu_bin <- function(s) {
   if (s %in% HS_BIN) {
     "high school"
@@ -112,7 +105,9 @@ df$doc_id <- seq(dim(df)[1])
 # building a corpus
 my_corpus <- corpus(df)
 
-# training SVM
+
+### MODELING
+# creating document frquency matrix
 my_dfm <- dfm(my_corpus, remove = stopwords("english"), stem = TRUE,
               remove_punct = TRUE, remove_numbers = TRUE)
 # removing features that occur in fewer than 2 documents
@@ -122,8 +117,10 @@ my_dfm <- dfm(my_corpus, remove = stopwords("english"), stem = TRUE,
 my_tfidf <- tfidf(my_dfm, normalize = TRUE) %>%
   as.matrix()
 
+# sampling (creating vector of indices)
 train_ind <- sample(seq_len(nrow(df)), size = nrow(df) * .8)
 
+# using indices to pslit data into train and test
 tr_X <- my_tfidf[train_ind,]
 tr_Y <- education[train_ind]
 te_X <- my_tfidf[-train_ind,]
@@ -131,6 +128,7 @@ te_Y <- education[-train_ind]
 dim(tr_X)
 dim(te_X)
 
+# training SVM
 library(LiblineaR)
 tr_X_s <- scale(tr_X, center=TRUE, scale = TRUE)
 
@@ -148,16 +146,9 @@ print(res)
 BCR=mean(c(res[1,1]/sum(res[,1]),res[2,2]/sum(res[,2]),res[3,3]/sum(res[,3]), res[4,4]/sum(res[,4]), res[5,5]/sum(res[,5])))
 print(BCR)
 
-library(e1071)
-svm1 <- svm(x = tr_X, y = as.factor(tr_Y), kernel = 'linear')
-tune.out=
-  tune(svm,y~.,data=dat,kernel="linear", ranges=list(cost=c(0.001, 0.01, 0.1,1,5,10,100)))
-
-
-library(randomForest)
-
-
-
+# poor results probably due to imblanced classes
+# imbalanced classes:
+# https://machinelearningmastery.com/tactics-to-combat-imbalanced-classes-in-your-machine-learning-dataset/
 # DOWNSAMPLING
 df_ds <- downSample(df, as.factor(education), yname ='education')
 education_ds <- df_ds$education
@@ -165,16 +156,17 @@ df_ds <- df_ds %>% select(-education)
 
 my_corpus_ds <- corpus(df_ds)
 
-# making document frequency matrix
+# making document frequency matrix from downsampled data
 my_dfm_ds <- dfm(my_corpus_ds, remove = stopwords("english"), stem = TRUE,
               remove_punct = TRUE, remove_numbers = TRUE)
 # removing features that occur in fewer than 2 documents
 (my_dfm_ds <- dfm_trim(my_dfm_ds, min_docfreq = 100, verbose=TRUE))
 
-# using text frequency - inverse document frequency weighting
+# using text frequency - inverse document frequency weighting on downsampled dfm
 my_tfidf_ds <- tfidf(my_dfm_ds, normalize = TRUE) %>%
   as.matrix()
 
+# splitting downsampled data
 train_ind <- sample(seq_len(nrow(df_ds)), size = nrow(df_ds) * .8)
 
 tr_X_ds <- my_tfidf_ds[train_ind,]
@@ -184,24 +176,25 @@ te_Y_ds <- education_ds[-train_ind]
 dim(tr_X_ds)
 dim(te_X_ds)
 
+# scaling downsampled data
 tr_X_ds_s <- scale(tr_X_ds, center = TRUE, scale = TRUE)
 te_X_ds_s <- scale(te_X_ds, center = TRUE, scale = TRUE)
 
+# training RF
+library(randomForest)
 start.time <- Sys.time()
 rf1 <- randomForest(tr_X_ds_s, y = tr_Y_ds, ntree = 50)
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-
 p_ds <- predict(rf1, te_X_ds_s)
 res_ds <- table(p_ds,te_Y_ds)
 print(res_ds)
 BCR_ds <- mean(c(res_ds[1,1]/sum(res_ds[,1]),res_ds[2,2]/sum(res_ds[,2]),res_ds[3,3]/sum(res_ds[,3]), res_ds[4,4]/sum(res_ds[,4]), res_ds[5,5]/sum(res_ds[,5])))
 print(BCR_ds)
-# imbalanced classes:
-# https://machinelearningmastery.com/tactics-to-combat-imbalanced-classes-in-your-machine-learning-dataset/
 
+# trying multiple model types and cost values
 types <- c(0:7)
 costs <- c(1000,1,0.001)
 best_cost <- NA
@@ -227,9 +220,9 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-cat("Best model type is:",bestTyp fe,"\n")
-cat("Best cost is:",bestCost,"\n")
-cat("Best accuracy is:",bestAcc,"\n")
+cat("Best model type is:",best_type,"\n")
+cat("Best cost is:",best_cost,"\n")
+cat("Best accuracy is:",best_acc,"\n")
 # Re-train best model with best cost value.
 best_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=best_type,cost=best_cost,bias=1,verbose=FALSE)
 # Scale the test data
@@ -238,3 +231,6 @@ te_X_ds_s <- scale(te_X_ds,attr(tr_X_ds_s,"scaled:center"),attr(tr_X_ds_s,"scale
 pr=FALSE
 if(bestType==0 || bestType==7) pr=TRUE
 p=predict(m,s2,proba=pr,decisionValues=TRUE)
+
+# i'm currently researching how to evaluate multiclass classifiers
+# so far, found this: https://www.quora.com/What-are-some-good-error-metrics-for-multi-class-classification-when-you-have-many-objects-to-classify
