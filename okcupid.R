@@ -205,22 +205,21 @@ tr_X_ds_s <- scale(tr_X_ds, center = TRUE, scale = TRUE)
 te_X_ds_s <- scale(te_X_ds, center = TRUE, scale = TRUE)
 
 # training RF
-
 start.time <- Sys.time()
-rf1 <- randomForest(tr_X_ds_s, y = tr_Y_ds, ntree = 50)
+rf1 <- randomForest(tr_X_ds_s, y = tr_Y_ds, ntree = 100)
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-p_ds <- predict(rf1, te_X_ds_s)
-res_ds <- table(p_ds,te_Y_ds)
-print(res_ds)
-BCR_ds <- mean(c(res_ds[1,1]/sum(res_ds[,1]),res_ds[2,2]/sum(res_ds[,2]),res_ds[3,3]/sum(res_ds[,3]), res_ds[4,4]/sum(res_ds[,4]), res_ds[5,5]/sum(res_ds[,5])))
-print(BCR_ds)
+p_rf_ds <- predict(rf1, te_X_ds_s)
+# confusion matrix
+cfm_rf <- table(p_rf_ds,te_Y_ds)
+print(cfm_rf)
+# outputting accuracy
+gen_accuracy(cfm_rf)
 
-# trying multiple model types and cost values
-
-costs <- c(100, 10, 1, 0.1, 0.01)
+# trying multiple cost values
+costs <- c(100, 1, 0.01)
 best_cost <- NA
 best_acc <- 0
 for(cost in costs) {
@@ -236,19 +235,19 @@ for(cost in costs) {
   }
 }
 
-
 cat("Best cost is:",best_cost,"\n")
 cat("Best accuracy is:",best_acc,"\n")
 
 # Re-train best model with best cost value.
-best_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=best_cost,bias=1,verbose=FALSE)
+best_lr_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=best_cost,bias=1,verbose=FALSE)
 
 # Scale the test data
 te_X_ds_s <- scale(te_X_ds,attr(tr_X_ds_s,"scaled:center"),attr(tr_X_ds_s,"scaled:scale"))
 # Make prediction
-pr=FALSE
-if(bestType==0 || bestType==7) pr=TRUE
-p=predict(m,s2,proba=pr,decisionValues=TRUE)
 
-acc <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=type,cost=cost,bias=1,cross=5,verbose=FALSE)
-cat("Results for C=", cost, " : ", acc, "accuracy.\n", sep="")
+p_lr_ds=predict(best_lr_model,te_X_ds_s,proba=TRUE,decisionValues=TRUE)
+cfm_lr <- table(p_lr_ds,te_Y_ds)
+print(cfm_lr)
+# outputting accuracy
+gen_accuracy(cfm_lr)
+gen_top_features(cfm_lr)
