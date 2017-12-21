@@ -11,7 +11,8 @@ library(stringr)
 library(topicmodels)
 library(tidytext)
 library(caret)
-
+library(LiblineaR)
+library(randomForest)
 
 # Constants ----
 set.seed(1)
@@ -59,9 +60,33 @@ edu_bin <- function(s) {
   }
 }
 
+accuracy <- function(cfm, bin) {
+  cfm[bin, bin]/sum(cfm[,bin])
+}
+
+gen_accuracy <- function(cfm) {
+  all_acc <- c()
+  for (bin in BINS) {
+    acc <- accuracy(cfm, bin)
+    all_acc <- c(all_acc, acc)
+    cat("Accuracy for ", bin, ": ", acc, "\n", sep="")
+  }
+  cat("Average accuracy: ", mean(all_acc))
+}
+
+top_features <- function(model, edu, n = 20) {
+  names(sort(model$W[edu,], T)[1:n])
+}
+
+gen_top_features <- function(model, n = 20) {
+  for (bin in BINS) {
+    cat("Top features for '", bin, "':\n", sep="")
+    print(top_features(model, bin, n))
+  }
+}
+
 # Main ----
 # Paths
-
 profiles_path <- file.path(DATA_DIR, 'profiles.csv')
 
 # Loading data
@@ -84,7 +109,7 @@ education <- sapply(profiles$education, edu_bin)
 # frequency counts for education level
 table(education)
 # barplot of education level freqs
-barplot(table(education))
+pie(table(education))
 # notice: lots of ppl with degrees received...
 # checking age, makes sense considering median age 30 and mean age 32
 summary(profiles$age)
@@ -92,10 +117,10 @@ summary(profiles$age)
 
 ### FORMATTING TEXT
 # concatenating answers from all questions to be one body of text
-text <- paste('"', profiles$essay0, profiles$essay1, profiles$essay2,
+text <- paste(profiles$essay0, profiles$essay1, profiles$essay2,
               profiles$essay3, profiles$essay4, profiles$essay5,
               profiles$essay6, profiles$essay7, profiles$essay8,
-              profiles$essay9, '"', sep = " ")
+              profiles$essay9, sep = " ")
 
 # constructing new data frame with a column denoting sex of profile and
 #   another containing their comprehensive writing
@@ -128,12 +153,11 @@ te_Y <- education[-train_ind]
 dim(tr_X)
 dim(te_X)
 
-# training SVM
-library(LiblineaR)
+# training first model
 tr_X_s <- scale(tr_X, center=TRUE, scale = TRUE)
 
 start.time <- Sys.time()
-m <- LiblineaR(data = tr_X_s, target = tr_Y, type = 1, bias = TRUE, verbose = FALSE)
+m <- LiblineaR(data = tr_X_s, target = tr_Y, type = 7, bias = 1, verbose = FALSE)
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
@@ -158,8 +182,8 @@ my_corpus_ds <- corpus(df_ds)
 
 # making document frequency matrix from downsampled data
 my_dfm_ds <- dfm(my_corpus_ds, remove = stopwords("english"), stem = TRUE,
-              remove_punct = TRUE, remove_numbers = TRUE)
-# removing features that occur in fewer than 2 documents
+                 remove_punct = TRUE, remove_numbers = TRUE)
+# removing features that occur in fewer than 100 documents
 (my_dfm_ds <- dfm_trim(my_dfm_ds, min_docfreq = 100, verbose=TRUE))
 
 # using text frequency - inverse document frequency weighting on downsampled dfm
@@ -181,7 +205,7 @@ tr_X_ds_s <- scale(tr_X_ds, center = TRUE, scale = TRUE)
 te_X_ds_s <- scale(te_X_ds, center = TRUE, scale = TRUE)
 
 # training RF
-library(randomForest)
+
 start.time <- Sys.time()
 rf1 <- randomForest(tr_X_ds_s, y = tr_Y_ds, ntree = 50)
 end.time <- Sys.time()
@@ -195,36 +219,30 @@ BCR_ds <- mean(c(res_ds[1,1]/sum(res_ds[,1]),res_ds[2,2]/sum(res_ds[,2]),res_ds[
 print(BCR_ds)
 
 # trying multiple model types and cost values
-types <- c(0:7)
-costs <- c(1000,1,0.001)
+
+costs <- c(100, 10, 1, 0.1, 0.01)
 best_cost <- NA
 best_acc <- 0
-best_type <- NA
-start.time <- Sys.time()
-for(type in types){
-  for(cost in costs){
-    start.time <- Sys.time()
-    acc <- LiblineaR(data=tir_X_ds_s,target=tr_Y_ds,type=type,cost=cost,bias=1,cross=5,verbose=FALSE)
-    end.time <- Sys.time()
-    time.taken <- end.time - start.time
-    time.taken
-    cat("Results for C=", cost, " : ", acc, "accuracy.\n", sep="")
-    if(acc>best_acc){
-      best_cost=cost
-      best_acc=acc
-      best_type=type
-    }
+for(cost in costs) {
+  start.time <- Sys.time()
+  acc <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=cost,bias=1,cross=3,verbose=FALSE)
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  cat("time taken:", time.taken, sep = " ")
+  cat("Results for C=", cost, " : ", acc, "accuracy.\n", sep="")
+  if(acc>best_acc){
+    best_cost=cost
+    best_acc=acc
   }
 }
-end.time <- Sys.time()
-time.taken <- end.time - start.time
-time.taken
 
-cat("Best model type is:",best_type,"\n")
+
 cat("Best cost is:",best_cost,"\n")
 cat("Best accuracy is:",best_acc,"\n")
+
 # Re-train best model with best cost value.
-best_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=best_type,cost=best_cost,bias=1,verbose=FALSE)
+best_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=best_cost,bias=1,verbose=FALSE)
+
 # Scale the test data
 te_X_ds_s <- scale(te_X_ds,attr(tr_X_ds_s,"scaled:center"),attr(tr_X_ds_s,"scaled:scale"))
 # Make prediction
@@ -232,5 +250,5 @@ pr=FALSE
 if(bestType==0 || bestType==7) pr=TRUE
 p=predict(m,s2,proba=pr,decisionValues=TRUE)
 
-# i'm currently researching how to evaluate multiclass classifiers
-# so far, found this: https://www.quora.com/What-are-some-good-error-metrics-for-multi-class-classification-when-you-have-many-objects-to-classify
+acc <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=type,cost=cost,bias=1,cross=5,verbose=FALSE)
+cat("Results for C=", cost, " : ", acc, "accuracy.\n", sep="")
