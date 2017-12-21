@@ -39,7 +39,8 @@ R_G_BIN <- c("graduated from masters program", "graduated from ph.d program",
              "graduated from law school", "graduated from med school")
 SC_BIN <- c("space camp", "dropped out of space camp", "working on space camp",
             "graduated from space camp")
-
+BINS <- c("high school", "pursuing undergraduate degree", "received undergraduate degree",
+          "pursuing graduate degree", "received graduate degree")
 
 # Functions ----
 
@@ -109,7 +110,7 @@ education <- sapply(profiles$education, edu_bin)
 # frequency counts for education level
 table(education)
 # barplot of education level freqs
-pie(table(education))
+barplot(table(education))
 # notice: lots of ppl with degrees received...
 # checking age, makes sense considering median age 30 and mean age 32
 summary(profiles$age)
@@ -162,13 +163,12 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-te_X_s <- scale(te_X, center=TRUE, scale = TRUE)
+te_X_s <- scale(te_X,attr(tr_X_s,"scaled:center"),attr(tr_X_s,"scaled:scale"))
 p <- predict(m, te_X_s, decisionValues = TRUE)
 
-res <- table(p$predictions,te_Y)
-print(res)
-BCR=mean(c(res[1,1]/sum(res[,1]),res[2,2]/sum(res[,2]),res[3,3]/sum(res[,3]), res[4,4]/sum(res[,4]), res[5,5]/sum(res[,5])))
-print(BCR)
+cfm_init_logreg <- table(p$predictions,te_Y)
+print(cfm_init_logreg)
+gen_accuracy(cfm_init_logreg)
 
 # poor results probably due to imblanced classes
 # imbalanced classes:
@@ -219,7 +219,7 @@ print(cfm_rf)
 gen_accuracy(cfm_rf)
 
 # trying multiple cost values
-costs <- c(100, 1, 0.01)
+costs <- c(100, 1, 0.01, 0.001)
 best_cost <- NA
 best_acc <- 0
 for(cost in costs) {
@@ -240,14 +240,21 @@ cat("Best accuracy is:",best_acc,"\n")
 
 # Re-train best model with best cost value.
 best_lr_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=best_cost,bias=1,verbose=FALSE)
-
+try_lr_model <- LiblineaR(data=tr_X_ds_s,target=tr_Y_ds,type=7,cost=0.001,bias=1,verbose=FALSE)
 # Scale the test data
 te_X_ds_s <- scale(te_X_ds,attr(tr_X_ds_s,"scaled:center"),attr(tr_X_ds_s,"scaled:scale"))
 # Make prediction
 
 p_lr_ds=predict(best_lr_model,te_X_ds_s,proba=TRUE,decisionValues=TRUE)
-cfm_lr <- table(p_lr_ds,te_Y_ds)
+cfm_lr <- table(p_lr_ds$predictions,te_Y_ds)
 print(cfm_lr)
 # outputting accuracy
 gen_accuracy(cfm_lr)
-gen_top_features(cfm_lr)
+gen_top_features(best_lr_model)
+
+p_lr_ds2=predict(try_lr_model,te_X_ds_s,proba=TRUE,decisionValues=TRUE)
+cfm_lr2 <- table(p_lr_ds2$predictions,te_Y_ds)
+print(cfm_lr2)
+# outputting accuracy
+gen_accuracy(cfm_lr2)
+gen_top_features(try_lr_model)
